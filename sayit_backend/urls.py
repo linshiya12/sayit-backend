@@ -26,7 +26,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),    
-    path("",include('user.urls'))
+    path("",include('user.urls')),
+    path("api/chat/",include('Chat.urls')),
 ]
 
 if settings.DEBUG:

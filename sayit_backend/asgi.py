@@ -1,16 +1,23 @@
-"""
-ASGI config for sayit_backend project.
+import os 
+import django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "sayit_backend.settings")
 
-It exposes the ASGI callable as a module-level variable named ``application``.
+django.setup()
 
-For more information on this file, see
-https://docs.djangoproject.com/en/5.0/howto/deployment/asgi/
-"""
-
-import os
-
+from channels.routing import ProtocolTypeRouter, URLRouter
 from django.core.asgi import get_asgi_application
+from channels.auth import AuthMiddlewareStack
+from Chat.middleware import JwtAuthMiddleware
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'sayit_backend.settings')
 
-application = get_asgi_application()
+from Chat.routers import websocket_urlpatterns
+
+
+application = ProtocolTypeRouter({
+    'http' : get_asgi_application(),
+    'websocket' : JwtAuthMiddleware(
+        URLRouter(
+            websocket_urlpatterns
+        )
+    )
+})

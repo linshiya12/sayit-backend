@@ -8,13 +8,83 @@ from django.contrib.auth import authenticate
 class SpokenlangSerializer(serializers.ModelSerializer):
     class Meta:
         model=Spokenlang
-        fields="__all__"
+        fields = ["id", "spoken_language"]
+        extra_kwargs = {
+            "spoken_language": {"validators": []}  # 🔥 IMPORTANT
+        }
 
 class UserSerializer(serializers.ModelSerializer):
-    spoken_languages = SpokenlangSerializer(many=True)
+    spoken_languages = SpokenlangSerializer(many=True,required=False)
     class Meta:
         model = User
         fields = "__all__"
+    def validate_first_name(self, value):
+        if value and not validate_name(value):
+            raise serializers.ValidationError("First name is invalid.")
+        return value
+
+    def validate_last_name(self, value):
+        if value and not validate_name(value):
+            raise serializers.ValidationError("Last name is invalid.")
+        return value
+
+    def validate_hourlyrate(self, value):
+        if value in ["", None]:
+            return None
+        if value <= 0:
+            raise serializers.ValidationError("Hourly rate must be greater than zero.")
+        return value
+
+    # ✅ OBJECT-LEVEL VALIDATION (OPTIONAL)
+    def validate(self, data):
+        return data
+
+
+    def update(self, instance, validated_data):
+        # 🔹 Extract spoken languages
+        spoken_languages_data = validated_data.pop("spoken_languages", None)
+
+        # 🔹 Native language fallback
+        native_language = validated_data.get(
+            "native_language",
+            instance.native_language
+        )
+
+        # 🔹 Update normal fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+
+        # 🔹 Handle spoken languages safely
+        if spoken_languages_data is not None:
+            lang_objects = []
+            seen_languages = set()
+
+            for lang in spoken_languages_data:
+                language = lang.get("spoken_language")
+
+                # skip empty or duplicate values
+                if not language or language in seen_languages:
+                    continue
+
+                obj, _ = Spokenlang.objects.get_or_create(
+                    spoken_language=language
+                )
+                lang_objects.append(obj)
+                seen_languages.add(language)
+
+            # 🔹 Ensure native language is included
+            if native_language and native_language not in seen_languages:
+                obj, _ = Spokenlang.objects.get_or_create(
+                    spoken_language=native_language
+                )
+                lang_objects.append(obj)
+
+            # 🔹 Replace user's spoken languages
+            instance.spoken_languages.set(lang_objects)
+
+        return instance
 
 class SignupSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -169,8 +239,65 @@ class FollowSerializer(serializers.ModelSerializer):
 
         return value
 
-        
-        
+class CommentSerializer(serializers.ModelSerializer):
+    user_id=UserSerializer(read_only=True)
+    class Meta:
+        model=Comments
+        fields="__all__"
+    def validate_content(self,value):
+        if not value.strip():
+            raise serializers.ValidationError("Content cannot be empty")
+        if len(value)>500:
+            raise serializers.ValidationError("content must be less than 500 characters")
+        return value
+
+class ReportSerializer(serializers.ModelSerializer):  
+    class Meta:
+        model=PostReport
+        fields="__all__"   
+    def validate_reason(self,value):
+        if value not in ["It's spam","Nudity or sexual activity","Hate speech or symbols"]:
+            raise serializers.ValidationError("invalid reason")
+        return value
+class LikesSerializer(serializers.ModelSerializer):  
+    class Meta:
+        model=Likes
+        fields="__all__" 
+    def validate(self, data):
+        user = self.context["request"].user
+        post = data["post"]
+
+        if Likes.objects.filter(user=user, post=post).exists():
+            raise serializers.ValidationError("Already liked")
+
+        return data
+    
+class RatingSerializer(serializers.ModelSerializer):
+    student=UserSerializer(read_only=True)
+    class Meta:
+        model=MentorRating
+        fields="__all__" 
+        read_only_fields = ["student"]
+    def validate_rating(self,value):
+        if value<1 or value>5:
+            raise serializers.ValidationError("Rating must be between 1 and 5")
+        return value
+    def validate_review(self,value):
+        if value and len(value)>500:
+            raise serializers.ValidationError("review must be less than 500 characters")
+        return value
+    def validate(self, attrs):
+        mentor = attrs.get("mentor")
+        student = self.context["request"].user
+
+        if MentorRating.objects.filter(mentor=mentor, student=student).exists():
+            raise serializers.ValidationError({
+                "detail": "You have already reviewed this mentor"
+            })
+
+        return attrs
+    
+
 
 # ********************************************************** adminSerializers**********************************************
 

@@ -15,6 +15,13 @@ from django.contrib.auth import authenticate
 from django.conf import settings
 import uuid
 import boto3
+from google.oauth2 import id_token
+from google.auth.transport import requests
+from django.shortcuts import get_object_or_404
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 class HomeView(APIView):
     def get(self, request):
@@ -24,7 +31,7 @@ class CustomTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
         try:
             refresh_token = request.COOKIES.get("refresh_token")
-            print("refr",refresh_token)
+            logger.info(f"refresh token: {refresh_token}")
             if not refresh_token:
                 return Response(
                     {"message": "Refresh token not found"},
@@ -126,14 +133,13 @@ class ResendOtpApi(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
         serializer = ResendOtpSerializer(data=request.data)
-
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data["email"]
 
         send_code_to_user(email)
-
+        
         return Response({"message": "OTP sent successfully"}, status=status.HTTP_200_OK)
 
 
@@ -145,6 +151,11 @@ class LoginView(APIView):
             print(request.data)
             if serializer.is_valid():
                 user=serializer.validated_data["user"]
+                if user.is_blocked:
+                    return Response(
+                        {"message": "Your account is blocked. Please contact support."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
                 refresh = RefreshToken.for_user(user)
                 response= Response({
                     "message":"Login successful",
@@ -269,6 +280,76 @@ class PasswordChangeAPIView(APIView):
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+# googleauthentication
+class GoogleLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        token = request.data.get("token")
+
+        if not token:
+            return Response(
+                {"error": "Token is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Verify token with Google
+            idinfo = id_token.verify_oauth2_token(
+                token,
+                requests.Request(),
+                settings.GOOGLE_OAUTH_CLIENT_ID
+            )
+            email = idinfo.get("email")
+            first_name = idinfo.get("given_name", "")
+            last_name = idinfo.get("family_name", "")
+
+        except ValueError:
+            return Response(
+                {"error": "Invalid Google token"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 🔑 EMAIL = IDENTITY
+        user, created = User.objects.get_or_create(
+            email=email,
+            defaults={
+                "first_name": first_name,
+                "last_name": last_name,
+                "username": email.split("@")[0],
+                "is_verified" : True
+            }
+        )
+
+        # OPTIONAL: mark as google user
+        if created:
+            user.set_unusable_password()
+            user.save()
+
+        refresh = RefreshToken.for_user(user)
+        response= Response({
+            "message": "Login successful",
+            "user":{
+                    "id": user.id,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "is_onboarded":user.is_onboarded,
+                    "role":user.role
+                },
+            "access": str(refresh.access_token),          
+            }, status=status.HTTP_200_OK)
+        response.set_cookie(
+            key="refresh_token",
+            value=str(refresh),
+            httponly=True,
+            secure=not settings.DEBUG,      
+            samesite="Lax",  
+            max_age=7 * 24 * 60 * 60  # 7 days
+        )
+        return response
+        
 
 class LogoutAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -290,14 +371,29 @@ class LogoutAPIView(APIView):
         response.delete_cookie("refresh_token")
         return response
 
-# fetch current user
+# fetch and edit current user
 class GetUserView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        logger.info("name")
         user = request.user  # get current logged-in user
         serializer = UserSerializer(user)
         return Response(serializer.data)
+    def put(self, request):
+        print(request.data)
+        serializer = UserSerializer(
+            request.user,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({"updated_user":serializer.data})
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 # fetch all users
 class GetAllUsersView(APIView):
@@ -332,6 +428,7 @@ class GeneratePresignedURL(APIView):
     def post(self, request):
         file_name = request.data["file_name"]
         file_type = request.data["file_type"]
+        folder = request.data["folder"]
 
         s3 = boto3.client(
             "s3",
@@ -340,7 +437,7 @@ class GeneratePresignedURL(APIView):
             region_name=settings.AWS_S3_REGION_NAME,
         )
 
-        key = f"posts/{uuid.uuid4()}_{file_name}"
+        key = f"{folder}/{uuid.uuid4()}_{file_name}"
 
         upload_url = s3.generate_presigned_url(
             ClientMethod="put_object",
@@ -361,6 +458,22 @@ class GeneratePresignedURL(APIView):
 
 class GetUserpostView(APIView):
     permission_classes = [IsAuthenticated]
+    def get(self, request, id):
+        print("hi")
+        user = get_object_or_404(User, id=id)
+        image_posts = Post.objects.filter(user=user,media_type="image").order_by("-created_at")
+        video_posts = Post.objects.filter(user=user,media_type="video").order_by("-created_at")
+        image_serializer = GetpostSerializer(image_posts, many=True)
+        video_serializer=GetpostSerializer(video_posts, many=True)
+        user_serializer = UserSerializer(user)
+        return Response({
+            "images": image_serializer.data,
+            "videos": video_serializer.data,
+            "user":user_serializer.data
+        })
+
+class GetOwnpostView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self, request):
         image_posts = Post.objects.filter(user=request.user,media_type="image").order_by("-created_at")
         video_posts = Post.objects.filter(user=request.user,media_type="video").order_by("-created_at")
@@ -373,7 +486,7 @@ class GetUserpostView(APIView):
             "user":user_serializer.data
         })
 
-class GetpostView(APIView):
+class GetGlobalPostView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
         image_posts = Post.objects.filter(media_type="image").order_by("-created_at")
@@ -397,7 +510,7 @@ class FollowView(APIView):
 
         follow, created = Follow.objects.get_or_create(
             follower=request.user,
-            following=serializer.validated_data["following"]
+            following=serializer.validated_data["following"],
         )
 
         if not created:
@@ -462,6 +575,188 @@ class FollowStatusView(APIView):
             "following_count": following_count
         })
 
+class CommentView(APIView):
+    permission_classes=[IsAuthenticated]
+    def post(self,request):
+        print(request.user.id)
+        serializer=CommentSerializer(data=request.data)
+        if serializer.is_valid():
+            comment=Comments.objects.create(
+                user_id=request.user,
+                post_id=serializer.validated_data["post_id"],
+                content=serializer.validated_data["content"]
+            )
+            return Response({"message":"Comment added successfully"},status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
+    def get(self, request):
+        post_id = request.query_params.get("post_id")
+
+        if not post_id:
+            return Response(
+                {"message": "post_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        comments = Comments.objects.filter(post_id=post_id)
+        serializer = CommentSerializer(comments, many=True)
+
+        return Response(
+            {"comments": serializer.data},
+            status=status.HTTP_200_OK
+        )
+
+    def delete(self,request):
+        comment_id = request.query_params.get("comment_id")
+
+        if not comment_id:
+            return Response(
+                {"message": "comment_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            comment = Comments.objects.get(id=comment_id,user_id=request.user)
+            comment.delete()
+            return Response(
+                {"message": "Comment deleted"},
+                status=status.HTTP_204_NO_CONTENT
+            )
+        except Comments.DoesNotExist:
+            return Response(
+                {"message": "Comment not found or not authorized"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+class DeleteOwnPostComment(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        comment_id = request.query_params.get("comment_id")
+        if not comment_id:
+            return Response(
+                {"message": "comment_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        deleted, _ = Comments.objects.filter(
+            id=comment_id,
+            post_id__user=request.user.id
+        ).delete()
+
+        if deleted == 0:
+            return Response(
+                {"message": "Comment not found or not authorized"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        return Response(
+            {"message": "Comment deleted"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+class ReportedView(APIView):
+    permission_classes=[IsAuthenticated]
+    def post(self,request):
+        serializer=PostSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(user_id=request.user.id)
+            return Response(
+                {"message":"Post reported successfully"},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
+
+class PostLikesView(APIView):
+    permission_classes=[IsAuthenticated]
+    def post(self,request):
+        serializer=LikesSerializer(data=request.data,context={"request": request})
+        if serializer.is_valid():
+            serializer.save(user=request.user)
+            return Response(
+                {"message":""},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
+    def delete(self,request):
+        post_id=request.query_params.get("post")
+        if not post_id:
+            return Response(
+                {"message": "post_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            ) 
+        try:
+            like=Likes.objects.get(user=request.user.id,post=post_id)
+            like.delete()
+            return Response(
+                {"message": "like removed"},
+                status=status.HTTP_204_NO_CONTENT
+            )
+        except Exception as e:
+            return Response(
+                {"message": "Something went wrong", "error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+class ReviewView(APIView):
+    permission_classes=[IsAuthenticated]
+    def post(self,request):
+        serializer=RatingSerializer(data=request.data,context={"request": request})
+        if serializer.is_valid():
+            student_id=request.user
+            if student_id==serializer.validated_data["mentor"]:
+                return Response(
+                    {"message":"You cannot rate yourself"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            serializer.save(student=request.user)
+            return Response(
+                {"message": "Review submitted successfully"},
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
+    def get(self,request):
+        mentorId=request.query_params.get("mentor_id")
+        if not mentorId:
+            return Response(
+                {"message": "mentor_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        reviews=MentorRating.objects.filter(mentor=mentorId)
+        serializer = RatingSerializer(reviews, many=True)
+        return Response(
+            {
+                "reviews":serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+    def delete(self,request):
+        review_id=request.query_params.get("id")
+        if not review_id:
+            return Response(
+                {"message": "review_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            ) 
+
+        
+        review=get_object_or_404(MentorRating,id=review_id)
+        if review.mentor != request.user:
+            return Response(
+                {"message": "You are not allowed to delete this review"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        review.delete()
+        return Response(
+            {"message":"review deleted successfully"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+
+
+
+
+
+
+
+
+        
 
 
 
@@ -485,3 +780,12 @@ class BlockUserView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+class GetAllpostView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        posts = Post.objects.all().order_by("-created_at")
+        serializer=GetpostSerializer(posts, many=True)
+        return Response({
+            "posts": serializer.data,
+        })
