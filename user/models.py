@@ -50,22 +50,24 @@ class Post(models.Model):
     created_at=models.DateField(auto_now_add=True)
     updated_at=models.DateField(auto_now=True)
     def __str__(self):
-        return self.media_url
+        return str(self.id)
 
 class PostReport(models.Model):
     user_id=models.ForeignKey('User', related_name='post_reported_user', on_delete=models.CASCADE)
     post_id=models.ForeignKey("Post", related_name='post_report', on_delete=models.CASCADE)
     reason=models.CharField(max_length=50)
+    is_reported=models.BooleanField(default=False)
     def __str__(self):
         return str(self.post_id)
 
 class Likes(models.Model):
     user=models.ForeignKey('User', related_name='post_liked_user', on_delete=models.CASCADE)
     post=models.ForeignKey("Post", related_name='post_liked', on_delete=models.CASCADE)
+    is_liked=models.BooleanField(default=False)
     class Meta:
         unique_together = ('user', 'post')
     def __str__(self):
-        return str(self.post_id)
+        return str(self.id)
 
 class Comments(models.Model):
     user_id=models.ForeignKey("User", related_name='comments', on_delete=models.CASCADE)

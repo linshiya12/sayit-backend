@@ -262,14 +262,13 @@ class ReportSerializer(serializers.ModelSerializer):
 class LikesSerializer(serializers.ModelSerializer):  
     class Meta:
         model=Likes
-        fields="__all__" 
+        fields=["post"]
     def validate(self, data):
         user = self.context["request"].user
         post = data["post"]
-
-        if Likes.objects.filter(user=user, post=post).exists():
+    
+        if Likes.objects.filter(user=user, post=post, is_liked=True).exists():
             raise serializers.ValidationError("Already liked")
-
         return data
     
 class RatingSerializer(serializers.ModelSerializer):

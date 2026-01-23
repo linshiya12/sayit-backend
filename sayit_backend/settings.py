@@ -17,6 +17,7 @@ from datetime import timedelta
 from dotenv import load_dotenv
 
 
+
 load_dotenv()
 
 
@@ -159,6 +160,7 @@ USE_TZ = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
 ]
+
 
 CORS_ALLOW_CREDENTIALS = True
 

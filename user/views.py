@@ -669,31 +669,55 @@ class PostLikesView(APIView):
     def post(self,request):
         serializer=LikesSerializer(data=request.data,context={"request": request})
         if serializer.is_valid():
-            serializer.save(user=request.user)
+            print(serializer.validated_data)
+            like=Likes.objects.filter(user=request.user,post=serializer.validated_data["post"]).first()
+            if like:
+                like.is_liked=True
+                like.save()
+            else:
+                Likes.objects.create(user=request.user,post=serializer.validated_data["post"],is_liked=True)
             return Response(
-                {"message":""},
+                {"message":"liked successfully"},
                 status=status.HTTP_200_OK
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
-    def delete(self,request):
-        post_id=request.query_params.get("post")
+    def get(self,request,id):
+        total_likes=Likes.objects.filter(post__id=id,is_liked=True).count()
+        if Likes.objects.filter(post__id=id,is_liked=True,user=request.user).exists():
+            is_liked=True
+        else:
+            is_liked=False
+        print(total_likes,is_liked)
+        return Response(
+            {"total_likes":total_likes, "is_liked":is_liked},
+            status=status.HTTP_200_OK
+        )
+
+    def put(self, request):
+        post_id = request.query_params.get("post")
+
         if not post_id:
             return Response(
-                {"message": "post_id is required"},
+                {"message": "post is required"},
                 status=status.HTTP_400_BAD_REQUEST
-            ) 
+            )
+
         try:
-            like=Likes.objects.get(user=request.user.id,post=post_id)
-            like.delete()
+            like = Likes.objects.get(user=request.user, post_id=post_id)
+            like.is_liked = False
+            like.save()
+
             return Response(
-                {"message": "like removed"},
-                status=status.HTTP_204_NO_CONTENT
+                {"message": "Like removed"},
+                status=status.HTTP_200_OK
             )
-        except Exception as e:
+
+        except Likes.DoesNotExist:
             return Response(
-                {"message": "Something went wrong", "error": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"message": "Like does not exist"},
+                status=status.HTTP_404_NOT_FOUND
             )
+
         
 class ReviewView(APIView):
     permission_classes=[IsAuthenticated]
