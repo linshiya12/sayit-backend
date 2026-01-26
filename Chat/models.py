@@ -1,6 +1,6 @@
 from django.db import models
 import shortuuid
-from .enums import RoomType , FileType
+from .enums import FileType,CategoryType
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from user.models import User
@@ -20,6 +20,11 @@ class ChatGroup(models.Model):
     group_name=models.CharField(max_length=128, unique=True, default=shortuuid.uuid)
     members=models.ManyToManyField(User, related_name='chat_members',blank=True)
     is_private = models.BooleanField(default=False)
+    category=models.CharField(
+        choices=FileType.choices, 
+        max_length=15, 
+        default=CategoryType.CHAT
+    )
     def __str__(self):
         return self.group_name
 

@@ -22,6 +22,10 @@ class ChatGroupSerializer(serializers.ModelSerializer):
             except Exception as e:
                 raise serializers.ValidationError(f"Validation failed: {str(e)}")
         return value
+    def validate_category(self,value):
+        if value not in ['chat','video']:
+            raise serializers.ValidationError("invalid category")
+        return value
 
 class GroupMessageSerializer(serializers.ModelSerializer):
     group = ChatGroupSerializer(read_only=True)

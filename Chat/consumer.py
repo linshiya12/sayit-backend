@@ -8,15 +8,22 @@ from django.utils import timezone
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope['user']
+        if self.user.is_anonymous:
+            await self.close()
+            return
         self.room_name = self.scope['url_route']['kwargs']['room_name']
         self.room_group_name = f"chat_{self.room_name}"
-        self.chatroom = await self.get_chatroom()
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.accept()
+        try:
+            self.chatroom = await self.get_chatroom()
+            await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+            await self.accept()
+        except ChatGroup.DoesNotExist:
+            await self.close()
   
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+        if hasattr(self, 'room_group_name'):
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
@@ -32,7 +39,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_chatroom(self):
-        return ChatGroup.objects.get(group_name=self.room_name)
+        return ChatGroup.objects.get(group_name=self.room_name,category='chat')
     
     @database_sync_to_async
     def create_message(self, new_message):
@@ -52,7 +59,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def chat_message(self, event):
         await self.send(text_data=json.dumps({
             "messages": event["messages"],
+            "room_id": self.chatroom.id,
         }))
+    async def user_status_update(self, event):
+        await self.send(text_data=json.dumps(event))
 
 class StatusConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -97,7 +107,7 @@ class StatusConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_user_rooms(self):
-        return list(ChatGroup.objects.filter(members=self.user))
+        return list(ChatGroup.objects.filter(members=self.user,category='chat'))
 
     @database_sync_to_async
     def update_user_presence(self, is_online, last_seen=None):
@@ -114,3 +124,29 @@ class StatusConsumer(AsyncWebsocketConsumer):
     async def user_status_update(self, event):
         # Sends status updates of OTHER users to this user's sidebar
         await self.send(text_data=json.dumps(event))
+    
+    async def chat_message(self, event):
+        pass
+
+
+class VideoConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.user=self.scope["user"]
+        if self.user.is_anonymous:
+            await self.close()
+            return
+        self.video_room= self.scope['url_route']['kwargs']['room_name']
+        self.video_group_name = f"video_{self.video_room}"
+        try:
+            self.videoroom=await self.get_video_room()
+            await self.channel_layer.group_add(self.video_group_name,self.channel_name)
+            await self.close()
+        except ChatGroup.DoesNotExist:
+            await self.close()
+    
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.video_group_name,self.channel_name)
+
+    @database_sync_to_async
+    def get_video_room(self):
+        return ChatGroup.objects.get(group_name=self.video_room,category="video")
