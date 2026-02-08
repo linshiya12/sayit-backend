@@ -376,7 +376,7 @@ class GetUserView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        logger.info("name")
+        logging.info("name")
         user = request.user  # get current logged-in user
         serializer = UserSerializer(user)
         return Response(serializer.data)

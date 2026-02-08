@@ -4,6 +4,9 @@ from .models import *
 from channels.db import database_sync_to_async
 from .serializer import GroupMessageSerializer
 from django.utils import timezone
+from django_redis import get_redis_connection
+
+MAX_VIDEOUSERS=2
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -133,20 +136,65 @@ class VideoConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user=self.scope["user"]
         if self.user.is_anonymous:
-            await self.close()
+            await self.close(code=4001,reason="user is not authenticated")
             return
         self.video_room= self.scope['url_route']['kwargs']['room_name']
         self.video_group_name = f"video_{self.video_room}"
-        try:
-            self.videoroom=await self.get_video_room()
-            await self.channel_layer.group_add(self.video_group_name,self.channel_name)
-            await self.close()
-        except ChatGroup.DoesNotExist:
-            await self.close()
+    
+        self.videoroom=await self.get_video_room()
+        if not self.video_room:
+            await self.close(code=4004,reason="Room not found")
+            return
+        
+        self.redis=get_redis_connection("default")
+        self.cache_key=f"room:{self.video_group_name}:users"
+
+        self.existing_users=await self.get_existing_users()
+        if len(self.existing_users)>=MAX_VIDEOUSERS:
+            await self.close(code=4002,reason="room is full")
+            return 
+        
+        await self.channel_layer.group_add(self.video_group_name,self.channel_name)
+        await self.accept()
+        await database_sync_to_async (self.redis.sadd)(self.cache_key,self.user.id)
+        await self.channel_layer.group_send(
+            self.video_group_name,
+            {
+                'type':'broadcast.new_peer',
+                'user':self.user.id,
+            }
+        )
     
     async def disconnect(self, close_code):
+        await database_sync_to_async (self.redis.srem)(self.cache_key,self.user.id)
+        await self.channel_layer.group_send(
+            self.video_group_name,
+            {
+                'type':'broadcast.user_left',
+                'user':self.user.id,
+            }
+        )
         await self.channel_layer.group_discard(self.video_group_name,self.channel_name)
+
 
     @database_sync_to_async
     def get_video_room(self):
         return ChatGroup.objects.get(group_name=self.video_room,category="video")
+    
+    @database_sync_to_async
+    def get_existing_users(self):
+        users=self.redis.smembers(self.cache_key)
+        print("users",users)
+        return [user.decode("utf-8") for user in users]
+
+    async def broadcast_new_peer(self,event):
+        await self.send(text_data=json.dumps({
+            'type': 'new_peer',
+            'user': event['user']
+        }))
+    
+    async def broadcast_user_left(self,event):
+        await self.send(text_data=json.dumps({
+            'type': 'user_left',
+            'user': event['user']
+        }))

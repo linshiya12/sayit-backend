@@ -65,7 +65,7 @@ class get_create_chatroom(APIView):
         serializer = ChatGroupSerializer(chatroom)
 
         return Response(
-            {"chat_room": serializer.data},
+            {"chat_room": serializer.data,"joined":"joined"},
             status=status.HTTP_200_OK
         )
 
