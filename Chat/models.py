@@ -43,7 +43,12 @@ class GroupMessage(models.Model):
     def __str__(self):
         return self.group.group_name
     
-    
+class GroupVideocall(models.Model):
+    group=models.ForeignKey(ChatGroup, related_name='videocall', on_delete=models.CASCADE)
+    author=models.ForeignKey(User,related_name='joined_user', on_delete=models.CASCADE)
+    total_duration=models.FloatField(default=0)
+    call_status=models.CharField(max_length=50)
+
     
 
 
