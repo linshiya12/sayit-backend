@@ -156,15 +156,57 @@ class VideoConsumer(AsyncWebsocketConsumer):
         
         await self.channel_layer.group_add(self.video_group_name,self.channel_name)
         await self.accept()
+        for user_id in self.existing_users:
+            username=await self.get_username(user_id)
+            await self.send(text_data=json.dumps({
+                "type": "new_peer",
+                "user": int(user_id),
+                "peername" : username
+            }))
         await database_sync_to_async (self.redis.sadd)(self.cache_key,self.user.id)
         await self.channel_layer.group_send(
             self.video_group_name,
             {
                 'type':'broadcast.new_peer',
                 'user':self.user.id,
+                'peername':self.user.first_name
             }
         )
     
+    async def receive(self, text_data):
+        data = json.loads(text_data)
+        message_type=data.get("type")
+        print("dara",data)
+        if message_type=="offer":
+            await self.channel_layer.group_send(
+                self.video_group_name,
+            {
+                "type": "broadcast.offer",
+                "offer": data["offer"],
+                "from_user": self.user.id,
+                "to":data["to"]
+            }
+            )
+        elif message_type=="answer":
+            await self.channel_layer.group_send(
+                self.video_group_name,
+            {
+                "type": "broadcast.answer",
+                "answer": data["answer"],
+                "from_user": self.user.id,
+                "to":data["to"]
+            }
+            )
+        if message_type=="ice":
+            await self.channel_layer.group_send(
+                self.video_group_name,
+            {
+                "type": "broadcast.ice",
+                "candidate": data["candidate"],
+                "from_user": self.user.id,
+            }
+            )
+        
     async def disconnect(self, close_code):
         await database_sync_to_async (self.redis.srem)(self.cache_key,self.user.id)
         await self.channel_layer.group_send(
@@ -187,14 +229,46 @@ class VideoConsumer(AsyncWebsocketConsumer):
         print("users",users)
         return [user.decode("utf-8") for user in users]
 
+    @database_sync_to_async
+    def get_username(self,user_id):
+        userdetails=User.objects.get(id=user_id)
+        return userdetails.first_name
+    
     async def broadcast_new_peer(self,event):
-        await self.send(text_data=json.dumps({
-            'type': 'new_peer',
-            'user': event['user']
-        }))
+        if event["user"]!=self.user.id:
+            await self.send(text_data=json.dumps({
+                'type': 'new_peer',
+                'user': event['user'],
+                'peername' : event["peername"]
+            }))
     
     async def broadcast_user_left(self,event):
         await self.send(text_data=json.dumps({
             'type': 'user_left',
             'user': event['user']
         }))
+    async def broadcast_offer(self,event):
+        if event["from_user"]!=self.user.id:
+            await self.send(text_data=json.dumps({
+            'type': 'offer',
+            "offer": event["offer"],
+            "from": event["from_user"],
+            "to": event["to"]
+            }))
+    
+    async def broadcast_answer(self,event):
+        if event["from_user"]!=self.user.id:
+            await self.send(text_data=json.dumps({
+            'type': 'answer',
+            "answer": event["answer"],
+            "from": event["from_user"],
+            "to": event["to"]
+            }))
+
+    async def broadcast_ice(self,event):
+        if event["from_user"]!=self.user.id:
+            await self.send(text_data=json.dumps({
+            'type': 'ice',
+            "candidate": event["candidate"],
+            "from": event["from_user"]
+            }))
