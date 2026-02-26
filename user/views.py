@@ -2,8 +2,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .serializer import *
 from rest_framework import status
-from .utils import send_code_to_user,verify_otp,Pass_verify_otp
-from .models import User,Spokenlang
+from .utils import send_code_to_user,verify_otp,Pass_verify_otp,get_time_category
+from .models import *
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from django.core.cache import cache
 from django.views.decorators.cache import never_cache
@@ -774,14 +774,22 @@ class ReviewView(APIView):
         )
 
 
-
-
-
-
-
-
-        
-
+class TimeAvailability(APIView):
+    permission_classes=[IsAuthenticated]
+    def post(self,request):
+        serializer=AvailabilitySerializer(data=request.data,many=True,context={"request": request})
+        if serializer.is_valid():
+           serializer.save(provider=request.user)
+           return Response({"message":"Availability saved successfully"},status=status.HTTP_201_CREATED)
+        print(serializer.errors)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
+    def get(self, request):
+        all_available_time = Availability.objects.filter(
+            provider=request.user,
+        )
+        serializer=AvailabilitySerializer(all_available_time,many=True)
+        return Response(serializer.data)
+    
 
 
 

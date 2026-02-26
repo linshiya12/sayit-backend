@@ -97,3 +97,11 @@ class MentorRating(models.Model):
         unique_together = ('mentor', 'student')
     def __str__(self):
         return str(self.mentor)
+
+class Availability(models.Model):
+    provider=models.ForeignKey('User', related_name='provider', on_delete=models.CASCADE)
+    available_time = models.DateTimeField()
+    is_booked=models.BooleanField(default=False)
+    def __str__(self):
+        return str(self.available_time)
+    

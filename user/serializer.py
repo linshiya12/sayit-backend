@@ -2,6 +2,8 @@ from rest_framework import serializers
 from .models import *
 from .utils import validate_name,validate_password
 from django.contrib.auth import authenticate
+import datetime
+from django.utils import timezone
 
 # from .models
 
@@ -296,6 +298,28 @@ class RatingSerializer(serializers.ModelSerializer):
 
         return attrs
     
+class AvailabilitySerializer(serializers.ModelSerializer):
+    provider=UserSerializer(read_only=True)
+    class Meta:
+        model=Availability
+        fields="__all__"
+        read_only_fields=["provider"]
+    def validate(self, data):
+        user=self.context["request"].user
+        time=data["available_time"]
+        if not user.role=="mentor":
+            raise serializers.ValidationError("provider must be a mentor")
+        if Availability.objects.filter(
+            provider=user,
+            available_time=time).exists():
+            raise serializers.ValidationError("This slot already exists")
+        return data
+    def validate_available_time(self,value):
+        today=datetime.datetime.today()
+        if value<=timezone.now():
+            raise serializers.ValidationError("cannot select past time")
+        return value
+            
 
 
 # ********************************************************** adminSerializers**********************************************
