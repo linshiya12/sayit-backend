@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/comment/',CommentView.as_view(),name="comments"),
     path('api/like/',PostLikesView.as_view(),name="Likes"),
     path('api/like/<int:id>/',PostLikesView.as_view(),name="Likes"),
+    path('api/availability/',TimeAvailability.as_view(),name="availability"),
     # admin
     path('api/admin/users',GetAllUsersView.as_view(),name="alluser"),
     path('api/admin/getallpost/',GetAllpostView.as_view(),name="getallpost"),
