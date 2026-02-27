@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from .manager import CustomUserManager
 from django.conf import settings
+from decimal import Decimal
 # Create your models here.
 
 
@@ -104,4 +105,24 @@ class Availability(models.Model):
     is_booked=models.BooleanField(default=False)
     def __str__(self):
         return str(self.available_time)
+
+class Wallet(models.Model):
+    owner=models.ForeignKey('User', related_name='wallet_user', on_delete=models.CASCADE)
+    balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+
+    def __str__(self):
+        return f"balance is {self.balance}"
     
+
+class Booking(models.Model):
+    student = models.ForeignKey('User', related_name='my_bookings', on_delete=models.CASCADE)
+    booked_mentor = models.ForeignKey('User', related_name='booked_mentor', on_delete=models.CASCADE)
+    booked_call = models.ForeignKey('Chat.ChatGroup', related_name='bookings', on_delete=models.CASCADE)
+    booking_slot = models.ForeignKey("Availability", related_name='booking_details', on_delete=models.CASCADE)
+    duration = models.IntegerField(default=60)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2) 
+    status = models.CharField(max_length=20, default='scheduled') # e.g., completed, cancelled
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Booking for {self.student.first_name} on {self.booking_slot.available_time}"

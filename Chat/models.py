@@ -3,7 +3,6 @@ import shortuuid
 from .enums import FileType,CategoryType
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
-from user.models import User
 import shortuuid
 from django.contrib.auth import get_user_model
 
@@ -14,11 +13,9 @@ from django.contrib.auth import get_user_model
 # room_members
 # seen_by
 
-User = get_user_model()
-
 class ChatGroup(models.Model):
     group_name=models.CharField(max_length=128, unique=True, default=shortuuid.uuid)
-    members=models.ManyToManyField(User, related_name='chat_members',blank=True)
+    members=models.ManyToManyField('user.User', related_name='chat_members',blank=True)
     is_private = models.BooleanField(default=False)
     category=models.CharField(
         choices=FileType.choices, 
@@ -30,7 +27,7 @@ class ChatGroup(models.Model):
 
 class GroupMessage(models.Model):
     group=models.ForeignKey(ChatGroup, related_name='chat_messages', on_delete=models.CASCADE)
-    author=models.ForeignKey(User,related_name='chat_sender', on_delete=models.CASCADE)
+    author=models.ForeignKey('user.User',related_name='chat_sender', on_delete=models.CASCADE)
     body=models.CharField(max_length=1000,blank=True, null=True)
     file = models.URLField(max_length=500, blank=True, null=True)
     file_type = models.CharField(
@@ -45,7 +42,7 @@ class GroupMessage(models.Model):
     
 class GroupVideocall(models.Model):
     group=models.ForeignKey(ChatGroup, related_name='videocall', on_delete=models.CASCADE)
-    author=models.ForeignKey(User,related_name='joined_user', on_delete=models.CASCADE)
+    author=models.ForeignKey('user.User',related_name='joined_user', on_delete=models.CASCADE)
     total_duration=models.FloatField(default=0)
     call_status=models.CharField(max_length=50)
 
