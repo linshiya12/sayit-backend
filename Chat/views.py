@@ -6,6 +6,7 @@ from rest_framework import status
 from .models import *
 from .serializer import *
 from django.shortcuts import get_object_or_404
+from user.models import User
 
 # Create your views here.
 

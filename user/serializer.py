@@ -4,7 +4,6 @@ from .utils import validate_name,validate_password
 from django.contrib.auth import authenticate
 import datetime
 from django.utils import timezone
-
 # from .models
 
 class SpokenlangSerializer(serializers.ModelSerializer):
@@ -319,7 +318,17 @@ class AvailabilitySerializer(serializers.ModelSerializer):
         if value<=timezone.now():
             raise serializers.ValidationError("cannot select past time")
         return value
-            
+
+class BookingSerializer(serializers.ModelSerializer):
+    student=UserSerializer(read_only=True)
+    booked_mentor = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role="mentor")
+    )
+    class Meta:
+        model=Booking
+        fields="__all__"
+    
+
 
 
 # ********************************************************** adminSerializers**********************************************

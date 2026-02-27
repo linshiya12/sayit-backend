@@ -19,6 +19,8 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from django.shortcuts import get_object_or_404
 import logging
+from django.utils import timezone
+from django.db import transaction
 
 
 logger = logging.getLogger(__name__)
@@ -783,15 +785,83 @@ class TimeAvailability(APIView):
            return Response({"message":"Availability saved successfully"},status=status.HTTP_201_CREATED)
         print(serializer.errors)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST) 
-    def get(self, request):
-        all_available_time = Availability.objects.filter(
-            provider=request.user,
+    def get(self,request,mentor_id=None):
+        if mentor_id:
+            date=request.GET.get('date')
+            mentor=get_object_or_404(User,id=mentor_id)
+            all_available_time = Availability.objects.filter(
+            provider=mentor,available_time__date=date,available_time__gt=timezone.now()
         )
+        else:
+            all_available_time = Availability.objects.filter(
+                provider=request.user,available_time__gt=timezone.now()
+            )
         serializer=AvailabilitySerializer(all_available_time,many=True)
         return Response(serializer.data)
-    
 
 
+class BookingView(APIView):
+    def get(self,request):
+        if request.user.role=="student":
+            scheduled_Booked_data=Booking.objects.filter(status="scheduled",student=request.user)
+            all_data=Booking.objects.filter(student=request.user)
+        else:
+            scheduled_Booked_data=Booking.objects.filter(status="scheduled",booked_mentor=request.user)
+            all_data=Booking.objects.filter(booked_mentor=request.user)
+        serializer=BookingSerializer(all_data)
+        scheduled_serializer=BookingSerializer(scheduled_Booked_data)
+        return Response(
+            {
+                "scheduled":scheduled_serializer.data,
+                "Allbooked":serializer.data
+            }
+        )
+    def post(self, request):
+        if request.user.role != 'student': 
+            return Response({"error": "Only students can book calls"}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = BookingSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    slot = serializer.validated_data['booking_slot']
+                    mentor = serializer.validated_data['booked_mentor']
+                    amount = Decimal(str(serializer.validated_data['amount_paid']))
+
+                    if slot.available_time < timezone.now():
+                        return Response({"error": "Cannot book a slot in the past"}, status=400)
+
+                    availability = Availability.objects.select_for_update().get(id=slot.id)
+                    
+                    if availability.is_booked:
+                        return Response({"error": "Slot already booked"}, status=400)
+                    
+                    if availability.provider != mentor:
+                        return Response({"error": "This slot does not belong to the selected mentor"}, status=400)
+
+                    student_wallet, _ = Wallet.objects.select_for_update().get_or_create(owner=request.user)
+                    mentor_wallet, _ = Wallet.objects.select_for_update().get_or_create(owner=mentor)
+
+                    if student_wallet.balance < amount:
+                        return Response({"error": "Insufficient balance"}, status=400)
+
+                    student_wallet.balance -= amount
+                    mentor_wallet.balance += amount
+                    student_wallet.save()
+                    mentor_wallet.save()
+
+                    availability.is_booked = True
+                    availability.save()
+
+                    booking = serializer.save(student=request.user)
+
+                    return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+
+            except Exception as e:
+                return Response({"error": str(e)}, status=500)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 

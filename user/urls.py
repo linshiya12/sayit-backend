@@ -26,8 +26,10 @@ urlpatterns = [
     path('api/review/',ReviewView.as_view(),name="review"),
     path('api/comment/',CommentView.as_view(),name="comments"),
     path('api/like/',PostLikesView.as_view(),name="Likes"),
-    path('api/like/<int:id>/',PostLikesView.as_view(),name="Likes"),
+    path('api/like/<int:id>/',PostLikesView.as_view(),name="postLikes"),
     path('api/availability/',TimeAvailability.as_view(),name="availability"),
+    path('api/availability/<int:mentor_id>/',TimeAvailability.as_view(),name="mentavailability"),
+    path('api/bookingcall/',BookingView.as_view(),name="booking"),
     # admin
     path('api/admin/users',GetAllUsersView.as_view(),name="alluser"),
     path('api/admin/getallpost/',GetAllpostView.as_view(),name="getallpost"),
